@@ -1,11 +1,12 @@
 // import { asyncHandler } from "../utils/asyncHandler.js";
 // import { ApiError } from "../utils/ApiError.js";
 // import { ApiResponse } from "../utils/ApiResponse.js";
+import Redis from "ioredis";
 import { User } from "../models/user.model.js";
 // import { uploadOnCloudinary } from "../utils/cloudinary.js";
 // import jwt from "jsonwebtoken";
 // import mongoose from "mongoose";
-
+import {redis} from "../lib/redis.js"
 const generateAccessAndRefreshTokens = async (userId) => {
   try {
     const userForToken = await User.findById(userId);
@@ -18,13 +19,20 @@ const generateAccessAndRefreshTokens = async (userId) => {
 
     return { accessToken, refreshToken };
   } catch (error) {
-    throw new ApiError(
-      500,
-      "something went wrong while generateAccessAndRefreshTokens"
-    );
+    return res.status(400).json({
+      msg: "something went wrong while generateAccessAndRefreshTokens",
+    });
   }
 };
 
+
+const storeRefreshToken = async (userId, refreshToken) => {
+  await redis.set(`refresh_token:${userId}`,refreshToken,"EX",7*24*60*60) //7days
+}
+const setCookie = async (res, accessToken, refreshToken ) => {
+  res.cookie("accessToken",  accessToken,{httpOnly:true, sercure:process.env.NODE_ENV === 'production', sameSite:"strict", maxAge:15*60*1000})
+  res.cookie("refreshToken",  refreshToken,{httpOnly:true, sercure:process.env.NODE_ENV === 'production', sameSite:"strict", maxAge:7*24*60*60*1000})
+}
 const registerUser = async (req, res) => {
   try {
     const { userName, email, password } = req.body;
@@ -49,6 +57,16 @@ const registerUser = async (req, res) => {
       password,
     });
 
+
+
+    const { accessToken, refreshToken } = await generateAccessAndRefreshTokens(
+      newUser._id
+    );
+    //save the refreshToken to the redis database
+    await storeRefreshToken(newUser._id, refreshToken)
+
+    setCookie(res, accessToken, refreshToken )
+
     const createdUser = await User.findById(newUser._id).select(
       "-password -refreshToken"
     );
@@ -56,48 +74,107 @@ const registerUser = async (req, res) => {
       return res.status(500).json({ msg: "Failed to create user" });
     }
 
-    return res
-    .status(201)
-    .json({
+    return res.status(201).json({
       user: createdUser,
-      msg:"User created successfully"});
-
-
+      msg: "User created successfully",
+    });
   } catch (error) {
     console.error("Error in registerUser:", error);
     return res.status(500).json({ msg: "Internal Server Error" });
   }
 };
-// const logOutUser = asyncHandler(async (req, res, next) => {
-//   /*
-//   findUser but we don't have access to user in this method
-//   so we will use middleware i.e auth.middleware.js in which we will verify user token if its verified we will add an Object xyz in req
-//   clear cookie first and reset refresh Token
-//   */
 
-//   await User.findByIdAndUpdate(
-//     req.user?._id,
-//     {
-//       $set: {
-//         refreshToken: undefined,
-//       },
-//     },
-//     {
-//       new: true, // we will get the updated value in response that is undefined
-//     }
-//   );
+const loginUser = async (req, res) => {
+  try {
+    //  get user details from FE,
+    const { userName, email, password } = req.body;
 
-//   const options = {
-//     httpOnly: true,
-//     secure: true,
-//   };
+    if (!email) {
+      return res.status(400).json({ msg: "Email required" });
+    }
 
-//   return res
-//     .status(200)
-//     .clearCookie("accessToken", options)
-//     .clearCookie("refreshToken", options)
-//     .json(new ApiResponse(200, {}, "User logged Out"));
-// });
+    // check if user exists,
+    const existedUser = await User.findOne({
+      $or: [
+        //give values to check
+        { email },
+      ],
+    });
+
+    if (!existedUser) {
+      return res.status(400).json({ msg: "user not found " });
+    }
+
+    //verify password
+    const isPasswordValid = await existedUser.isPasswordCorrect(password);
+    if (!isPasswordValid) {
+      return res.status(401).json({ msg: "Incorrect password" });
+    }
+
+    // generate access amd refresh token,
+    const { accessToken, refreshToken } = await generateAccessAndRefreshTokens(
+      existedUser._id
+    );
+    const loggedInUser = await User.findById(existedUser._id).select(
+      "-password -refreshToken"
+    );
+    //send it using cookies
+    const options = {
+      httpOnly: true,
+      secure: true,
+    };
+
+    return res
+      .status(200)
+      .cookie("accessToken", accessToken, options)
+      .cookie("refreshToken", refreshToken, options)
+      .json({
+        user: loggedInUser,
+        accessToken,
+        refreshToken, //sending accessToken refreshToken again for FE needs may FE wants to store it in localStorage
+        msg: "User logged In Successfully",
+      });
+  } catch (error) {
+    console.error("Error in LoginUser:", error);
+    return res.status(500).json({ msg: "Internal Server Error" });
+  }
+};
+
+const logOutUser = async (req, res, next) => {
+  /*
+  findUser but we don't have access to user in this method
+  so we will use middleware i.e auth.middleware.js in which we will verify user token if its verified we will add an Object xyz in req
+  clear cookie first and reset refresh Token
+  */
+
+  try {
+    await User.findByIdAndUpdate(
+      req.user?._id,
+      {
+        $set: {
+          refreshToken: undefined,
+        },
+      },
+      {
+        new: true, // we will get the updated value in response that is undefined
+      }
+    );
+
+    const options = {
+      httpOnly: true,
+      secure: true,
+    };
+
+    return res
+      .status(200)
+      .clearCookie("accessToken", options)
+      .clearCookie("refreshToken", options)
+      .json({ msg: "User logged Out" });
+  } catch (error) {
+    console.error("Error in LoginUser:", error);
+    return res.status(500).json({ msg: "Internal Server Error" });
+  }
+};
 
 // const refreshAccessToken = asyncHandler(async (req, res) => {
 //   const incomingRefreshToken =
@@ -388,7 +465,7 @@ const registerUser = async (req, res) => {
 
 export {
   registerUser,
-  // loginUser,
+  loginUser,
   // logOutUser,
   // refreshAccessToken,
   // changeCurrentPassword,
