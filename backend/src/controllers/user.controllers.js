@@ -1,12 +1,13 @@
 // import { asyncHandler } from "../utils/asyncHandler.js";
 // import { ApiError } from "../utils/ApiError.js";
 // import { ApiResponse } from "../utils/ApiResponse.js";
-import Redis from "ioredis";
 import { User } from "../models/user.model.js";
 // import { uploadOnCloudinary } from "../utils/cloudinary.js";
 // import jwt from "jsonwebtoken";
 // import mongoose from "mongoose";
-import {redis} from "../lib/redis.js"
+import { redis } from "../lib/redis.js";
+import jwt from "jsonwebtoken";
+
 const generateAccessAndRefreshTokens = async (userId) => {
   try {
     const userForToken = await User.findById(userId);
@@ -25,14 +26,28 @@ const generateAccessAndRefreshTokens = async (userId) => {
   }
 };
 
-
 const storeRefreshToken = async (userId, refreshToken) => {
-  await redis.set(`refresh_token:${userId}`,refreshToken,"EX",7*24*60*60) //7days
-}
-const setCookie = async (res, accessToken, refreshToken ) => {
-  res.cookie("accessToken",  accessToken,{httpOnly:true, sercure:process.env.NODE_ENV === 'production', sameSite:"strict", maxAge:15*60*1000})
-  res.cookie("refreshToken",  refreshToken,{httpOnly:true, sercure:process.env.NODE_ENV === 'production', sameSite:"strict", maxAge:7*24*60*60*1000})
-}
+  await redis.set(
+    `refresh_token:${userId}`,
+    refreshToken,
+    "EX",
+    7 * 24 * 60 * 60
+  ); //7days
+};
+const setCookie = async (res, accessToken, refreshToken) => {
+  res.cookie("accessToken", accessToken, {
+    httpOnly: true,
+    sercure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    maxAge: 15 * 60 * 1000,
+  });
+  res.cookie("refreshToken", refreshToken, {
+    httpOnly: true,
+    sercure: process.env.NODE_ENV === "production",
+    sameSite: "strict",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  });
+};
 const registerUser = async (req, res) => {
   try {
     const { userName, email, password } = req.body;
@@ -57,15 +72,13 @@ const registerUser = async (req, res) => {
       password,
     });
 
-
-
     const { accessToken, refreshToken } = await generateAccessAndRefreshTokens(
       newUser._id
     );
     //save the refreshToken to the redis database
-    await storeRefreshToken(newUser._id, refreshToken)
+    await storeRefreshToken(newUser._id, refreshToken);
 
-    setCookie(res, accessToken, refreshToken )
+    setCookie(res, accessToken, refreshToken);
 
     const createdUser = await User.findById(newUser._id).select(
       "-password -refreshToken"
@@ -87,7 +100,7 @@ const registerUser = async (req, res) => {
 const loginUser = async (req, res) => {
   try {
     //  get user details from FE,
-    const { userName, email, password } = req.body;
+    const { email, password } = req.body;
 
     if (!email) {
       return res.status(400).json({ msg: "Email required" });
@@ -115,6 +128,12 @@ const loginUser = async (req, res) => {
     const { accessToken, refreshToken } = await generateAccessAndRefreshTokens(
       existedUser._id
     );
+
+    //save the refreshToken to the redis database
+    await storeRefreshToken(existedUser._id, refreshToken);
+
+    setCookie(res, accessToken, refreshToken);
+
     const loggedInUser = await User.findById(existedUser._id).select(
       "-password -refreshToken"
     );
@@ -141,38 +160,57 @@ const loginUser = async (req, res) => {
 };
 
 const logOutUser = async (req, res, next) => {
-  /*
-  findUser but we don't have access to user in this method
-  so we will use middleware i.e auth.middleware.js in which we will verify user token if its verified we will add an Object xyz in req
-  clear cookie first and reset refresh Token
-  */
-
   try {
-    await User.findByIdAndUpdate(
-      req.user?._id,
-      {
-        $set: {
-          refreshToken: undefined,
-        },
-      },
-      {
-        new: true, // we will get the updated value in response that is undefined
-      }
-    );
+    const refreshToken = req.cookies.refreshToken;
+    if (refreshToken) {
+      const decoded = jwt.verify(
+        refreshToken,
+        process.env.REFRESH_TOKEN_SECRET
+      );
+      await redis.del(`refresh_token:${decoded._id}`);
+    }
 
-    const options = {
-      httpOnly: true,
-      secure: true,
-    };
-
-    return res
-      .status(200)
-      .clearCookie("accessToken", options)
-      .clearCookie("refreshToken", options)
-      .json({ msg: "User logged Out" });
+    res.clearCookie("accessToken");
+    res.clearCookie("refreshToken");
+    res.json({ msg: "User logged Out" });
   } catch (error) {
     console.error("Error in LoginUser:", error);
     return res.status(500).json({ msg: "Internal Server Error" });
+  }
+};
+
+const refreshAccessToken = async (req, res) => {
+  const incomingRefreshToken = (await req.cookies.refreshToken) || req.body.refreshToken;
+  if (!incomingRefreshToken) {
+    res.status(401).json({ msg: "UnAuthorized request" });
+    return;
+  }
+
+  try {
+    const decodedToken = jwt.verify(
+      incomingRefreshToken,
+      process.env.REFRESH_TOKEN_SECRET
+    );
+    const storedToken = await redis.get(`refresh_token:${decodedToken._id}`);
+
+    if (storedToken !== incomingRefreshToken) {
+      res.status(401).json({ msg: "Refresh token is expired or used" });
+      return;
+    }
+
+    const { accessToken, newRefreshToken } =
+      await generateAccessAndRefreshTokens(decodedToken._id);
+    res.cookie("accessToken", accessToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 15 * 60 * 1000,
+    });
+
+    res.json({ msg: "Token refreshed" });
+  } catch (error) {
+    console.error("Error in refreshAccessToken:", error);
+    res.status(401).json({ msg: error?.message || "failed refreshing token" });
   }
 };
 
@@ -466,8 +504,8 @@ const logOutUser = async (req, res, next) => {
 export {
   registerUser,
   loginUser,
-  // logOutUser,
-  // refreshAccessToken,
+  logOutUser,
+  refreshAccessToken,
   // changeCurrentPassword,
   // updateUser,
   // deleteUser,
