@@ -6,7 +6,7 @@ export const getProducts = async (req, res) => {
             SELECT * FROM products
             ORDER BY created_at DESC
         `;
-    console.log("products..............", products);
+    console.log("prodget All products..............", products);
     res.status(200).json({ success: true, data: products });
   } catch (error) {
     console.log("error fetching products", error);
