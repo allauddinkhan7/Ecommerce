@@ -11,6 +11,7 @@ app.use(express.urlencoded({extended: true, limit: "16kb"}))
 app.use(cors());
 app.use(helmet()); // we can get header through which we can secure our app by setting various http headers
 app.use(morgan("dev")) //log the requests
+app.set("trust proxy", true);
 
 
 

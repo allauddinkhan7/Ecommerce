@@ -9,7 +9,11 @@ import "dotenv/config"
 export const aj = arcjet({
     key: process.env.ARCJET_KEY,
     //we would like keep the track of rqsts by ip addresses
-    characteristics: ["ip.src"],
+    // characteristics: ["ip.src"],
+  characteristics:  process.env.NODE_ENV === "production"
+    ? ["user-agent"]
+    : ["ip"],
+
     rules:[
         //sheild products you app from attacks e.g SQL injections, XSS
         shield({mode: "LIVE"}),
