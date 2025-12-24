@@ -1,35 +1,25 @@
-import arcjet, {tokenBucket, shield, detectBot} from "@arcjet/node";
-
-
-import "dotenv/config"
-
-//initial archjet
-
+import arcjet, { tokenBucket, shield, detectBot } from "@arcjet/node";
+import "dotenv/config";
 
 export const aj = arcjet({
-    key: process.env.ARCJET_KEY,
-    //we would like keep the track of rqsts by ip addresses
-    // characteristics: ["ip.src"],
-  characteristics:  process.env.NODE_ENV === "production"
-    ? ["user-agent"]
-    : ["ip"],
+  key: process.env.ARCJET_KEY,
 
-    rules:[
-        //sheild products you app from attacks e.g SQL injections, XSS
-        shield({mode: "LIVE"}),
-        detectBot({
-            mode: "LIVE",
-            //block all the bot except search engines
-            allow:[
-                "CATEGORY:SEARCH_ENGINE"
-            ]
-        }),
-        //rate Limiting
-        tokenBucket({
-            mode: "LIVE",
-            refillRate: 5,  // after 10s we gonna have 5 refills
-            interval: 10, //seconds
-            capacity: 10, //initially we have 10 token
-        })
-    ]
-})
+  // ✅ DO NOT set characteristics in development
+  characteristics: [],
+
+  rules: [
+    shield({ mode: "LIVE" }),
+
+    detectBot({
+      mode: "LIVE",
+      allow: ["CATEGORY:SEARCH_ENGINE"],
+    }),
+
+    tokenBucket({
+      mode: "LIVE",
+      refillRate: 5,
+      interval: 10,
+      capacity: 10,
+    }),
+  ],
+});

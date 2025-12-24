@@ -13,41 +13,18 @@ app.use(helmet()); // we can get header through which we can secure our app by s
 app.use(morgan("dev")) //log the requests
 app.set("trust proxy", true);
 
-
-
-//apply arcjet rate-limiting to all routes
 app.use(async (req, res, next) => {
-    try {
-      const decision = await aj.protect(req, {
-        requested: 1, // specifies that each req consumes 1 token
-      });
+  const decision = await aj.protect(req);
 
-      if (decision.isDenied()) {
-        if (decision.reason.isRateLimit()) {
-          res.status(429).json({ error: "Rate limit exceeded" });
-        } else if (decision.reason.isBot()) {
-          res.status(403).json({ error: "bOT detection denied" });
-        } else {
-          res.status(403).json({ error: "Forbidden" });
-        }
-      } else {
-        return;
-      }
+  if (decision.isDenied()) {
+    return res.status(429).json({ message: "Blocked by Arcjet" });
+  }
 
-      //check for spoofed bots
-      if (decision.results.some(isSpoofedBot)) {
-        res.status(403).json({ error: "Forbidden" });
-        return;
-      } 
+  next();
+});
 
-      next();
-    } catch (error) {
-        console.log("error in apply arcjet rate-limiting", error)
-        next(error)
-    }
-})
 
-app.use("/api/products", productRouter) //   /api/auth/authRoutes
+app.use("/api/products", productRouter) 
 
 
 

@@ -38,7 +38,6 @@ export const createProduct = async (req, res) => {
 
 export const getProduct = async (req, res) => {
   const { id } = req.params;
-  console.log(id);
   try {
     const product = await sql`
             select * FROM products WHERE id = ${id}
@@ -77,21 +76,19 @@ export const updateProduct = async (req, res) => {
 
 export const deleteProduct = async (req, res) => {
   const { id } = req.params;
-
   try {
     const deletedProduct = await sql`
             DELETE FROM products WHERE products.id = ${id}
             RETURNING *
 
         `;
-    console.log("deletedProduct............................",deletedProduct )
 
     if (deletedProduct.length == 0) {
-      return res.status(404).json({ success: false, msg: "product not found" });
+      return res.status(404).json({ success: false, message: "product not found" });
     }
     res.status(200).json({ success: true });
   } catch (error) {
     console.log("error while creating", error);
-    res.status(500).json({ success: false, msg: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
