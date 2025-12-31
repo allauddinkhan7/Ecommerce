@@ -14,8 +14,8 @@ export const useProductStore = create((set, get) => ({
     price: "",
     image: "",
   },
-  setFormData: (formData) => set({ formData }),
-
+  setFormData: (formData) => set({ formData }), // this is for setting form data without this we cant edit the form fields 
+  resetFormData: () => set({formData: { name: "", price: "", image: ""}}), // to reset form data after submission
   
 
 
@@ -93,14 +93,4 @@ export const useProductStore = create((set, get) => ({
     set({ loading: false });
   }
 },
-
-
-
-
-
-
-
-
-
-
 }));
